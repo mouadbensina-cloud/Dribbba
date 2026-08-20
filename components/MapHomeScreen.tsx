@@ -80,7 +80,7 @@ export function MapHomeScreen({ city, quartiers }: MapHomeScreenProps) {
   }
 
   return (
-    <div className="relative mx-auto h-dvh max-w-[430px] overflow-hidden bg-background">
+    <div className="relative mx-auto h-dvh w-full max-w-[430px] overflow-hidden bg-background">
       <Map
         city={city}
         quartiers={quartiers}

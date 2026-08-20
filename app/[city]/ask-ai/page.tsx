@@ -1,8 +1,11 @@
 import { notFound } from "next/navigation";
 import { ChatInterface } from "@/components/ChatInterface";
 import { getCityBySlug } from "@/lib/data";
+import { STATIC_CITY } from "@/lib/staticData";
 
-export const dynamic = "force-dynamic";
+export function generateStaticParams() {
+  return [{ city: STATIC_CITY.slug }];
+}
 
 interface AskAiPageProps {
   params: Promise<{ city: string }>;

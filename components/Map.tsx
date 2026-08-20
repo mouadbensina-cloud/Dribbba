@@ -1,34 +1,32 @@
 "use client";
 
-import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef, useState } from "react";
-import { MAP_STYLES } from "@/lib/mapStyles";
 import type { City, QuartierSummary } from "@/lib/types";
 
 const BRAND = "#e2622e";
-let mapsApiOptionsSet = false;
+const SOURCE_ID = "quartiers";
+const FILL_LAYER_ID = "quartier-fill";
+const LINE_LAYER_ID = "quartier-line";
 
-const SPARKLE_ICON_URL =
-  "data:image/svg+xml;charset=UTF-8," +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-      <circle cx="14" cy="14" r="13" fill="${BRAND}" stroke="white" stroke-width="2"/>
+const SPARKLE_HTML = `
+  <div style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:9999px;background:${BRAND};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.25);">
+    <svg width="14" height="14" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M14 8l1.3 3.7L19 13l-3.7 1.3L14 18l-1.3-3.7L9 13l3.7-1.3L14 8z" fill="white"/>
-    </svg>`,
-  );
+    </svg>
+  </div>`;
 
-function polygonToPaths(polygon: QuartierSummary["polygon"]): google.maps.LatLngLiteral[] {
-  const ring = polygon.coordinates[0] ?? [];
-  const points = ring.map(([lng, lat]) => ({ lat, lng }));
-  // Drop a duplicated closing point (GeoJSON rings are closed; Maps paths don't need it).
-  if (
-    points.length > 1 &&
-    points[0].lat === points[points.length - 1].lat &&
-    points[0].lng === points[points.length - 1].lng
-  ) {
-    points.pop();
-  }
-  return points;
+function toFeatureCollection(quartiers: QuartierSummary[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: quartiers.map((q) => ({
+      type: "Feature",
+      id: q.slug,
+      properties: { slug: q.slug },
+      geometry: q.polygon as GeoJSON.Polygon,
+    })),
+  };
 }
 
 interface MapProps {
@@ -41,130 +39,153 @@ interface MapProps {
 
 export function Map({ city, quartiers, selectedSlug, aiMatchSlugs, onSelectQuartier }: MapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
-  const polygonsRef = useRef<Record<string, google.maps.Polygon>>({});
-  const markersRef = useRef<Record<string, google.maps.Marker>>({});
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<Record<string, mapboxgl.Marker>>({});
   const suppressMapClickRef = useRef(false);
   const [ready, setReady] = useState(false);
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  const [loadError, setLoadError] = useState<string | null>(apiKey ? null : "missing-key");
+  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+  const [loadError, setLoadError] = useState<string | null>(token ? null : "missing-key");
 
   // Init map once.
   useEffect(() => {
-    if (!apiKey) return;
-    if (!containerRef.current) return;
+    if (!token || !containerRef.current) return;
 
-    let cancelled = false;
-    if (!mapsApiOptionsSet) {
-      setOptions({ key: apiKey, v: "weekly" });
-      mapsApiOptionsSet = true;
-    }
+    mapboxgl.accessToken = token;
+    const map = new mapboxgl.Map({
+      container: containerRef.current,
+      style: "mapbox://styles/mapbox/light-v11",
+      center: [city.center_lng, city.center_lat],
+      zoom: city.default_zoom,
+      attributionControl: false,
+    });
+    map.addControl(new mapboxgl.AttributionControl({ compact: true }));
 
-    Promise.all([importLibrary("maps"), importLibrary("marker")])
-      .then(() => {
-        if (cancelled || !containerRef.current) return;
+    map.on("load", () => setReady(true));
+    map.on("error", (e) => {
+      console.error("Mapbox error", e.error);
+      setLoadError("load-failed");
+    });
 
-        const map = new google.maps.Map(containerRef.current, {
-          center: { lat: city.center_lat, lng: city.center_lng },
-          zoom: city.default_zoom,
-          disableDefaultUI: true,
-          zoomControl: true,
-          gestureHandling: "greedy",
-          styles: MAP_STYLES,
-        });
+    map.on("click", FILL_LAYER_ID, (e) => {
+      const slug = e.features?.[0]?.properties?.slug as string | undefined;
+      if (!slug) return;
+      suppressMapClickRef.current = true;
+      onSelectQuartier(slug);
+      setTimeout(() => {
+        suppressMapClickRef.current = false;
+      }, 0);
+    });
 
-        map.addListener("click", () => {
-          if (suppressMapClickRef.current) return;
-          onSelectQuartier(null);
-        });
+    map.on("click", () => {
+      // The FILL_LAYER_ID listener above sets this flag first when a
+      // polygon was clicked, since Mapbox GL fires both listeners on the
+      // same click; skip deselecting in that case.
+      if (suppressMapClickRef.current) return;
+      onSelectQuartier(null);
+    });
 
-        mapRef.current = map;
-        setReady(true);
-      })
-      .catch((err: unknown) => {
-        console.error("Google Maps failed to load", err);
-        if (!cancelled) setLoadError("load-failed");
-      });
+    mapRef.current = map;
+
+    // The container's final size can settle after Mapbox's first
+    // measurement (e.g. while Tailwind/layout is still resolving on first
+    // paint), leaving the canvas stuck at a stale size — keep it in sync.
+    const resizeObserver = new ResizeObserver(() => map.resize());
+    resizeObserver.observe(containerRef.current);
 
     return () => {
-      cancelled = true;
+      resizeObserver.disconnect();
+      map.remove();
+      mapRef.current = null;
+      setReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey, city.id]);
+  }, [token, city.id]);
 
-  // Create polygons + markers once map is ready / quartiers change.
+  // Add source + layers once the style has loaded, and keep the source data
+  // in sync if the quartier list changes.
   useEffect(() => {
     if (!ready || !mapRef.current) return;
     const map = mapRef.current;
-    const g = google;
+    const data = toFeatureCollection(quartiers);
+    const existing = map.getSource(SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
 
-    for (const polygon of Object.values(polygonsRef.current)) polygon.setMap(null);
-    for (const marker of Object.values(markersRef.current)) marker.setMap(null);
-    polygonsRef.current = {};
-    markersRef.current = {};
-
-    for (const quartier of quartiers) {
-      const polygon = new g.maps.Polygon({
-        paths: polygonToPaths(quartier.polygon),
-        map,
-        fillColor: BRAND,
-        fillOpacity: 0.15,
-        strokeColor: BRAND,
-        strokeOpacity: 0.4,
-        strokeWeight: 1.5,
-        clickable: true,
-      });
-
-      polygon.addListener("click", () => {
-        suppressMapClickRef.current = true;
-        onSelectQuartier(quartier.slug);
-        setTimeout(() => {
-          suppressMapClickRef.current = false;
-        }, 0);
-      });
-
-      polygonsRef.current[quartier.slug] = polygon;
-
-      const marker = new g.maps.Marker({
-        position: { lat: quartier.center_lat, lng: quartier.center_lng },
-        map: null,
-        icon: {
-          url: SPARKLE_ICON_URL,
-          scaledSize: new g.maps.Size(24, 24),
-          anchor: new g.maps.Point(12, 12),
-        },
-        clickable: false,
-        zIndex: 999,
-      });
-      markersRef.current[quartier.slug] = marker;
+    if (existing) {
+      existing.setData(data);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    map.addSource(SOURCE_ID, { type: "geojson", data });
+    map.addLayer({
+      id: FILL_LAYER_ID,
+      type: "fill",
+      source: SOURCE_ID,
+      paint: {
+        "fill-color": BRAND,
+        "fill-opacity": [
+          "case",
+          ["boolean", ["feature-state", "selected"], false],
+          0.4,
+          0.15,
+        ],
+      },
+    });
+    map.addLayer({
+      id: LINE_LAYER_ID,
+      type: "line",
+      source: SOURCE_ID,
+      paint: {
+        "line-color": BRAND,
+        "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 2, 1.5],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            ["boolean", ["feature-state", "selected"], false],
+            ["boolean", ["feature-state", "aiMatch"], false],
+          ],
+          1,
+          0.4,
+        ],
+      },
+    });
   }, [ready, quartiers]);
 
-  // Reactively style selected + AI-match state.
+  // Reactively style selected + AI-match state, and toggle sparkle markers.
   useEffect(() => {
-    if (!ready) return;
-    for (const [slug, polygon] of Object.entries(polygonsRef.current)) {
-      const isSelected = slug === selectedSlug;
-      const isAiMatch = aiMatchSlugs.includes(slug);
-      polygon.setOptions({
-        fillOpacity: isSelected ? 0.4 : 0.15,
-        strokeOpacity: isSelected || isAiMatch ? 1 : 0.4,
-        strokeWeight: isSelected ? 2 : 1.5,
-        zIndex: isSelected ? 10 : isAiMatch ? 5 : 1,
-      });
+    if (!ready || !mapRef.current) return;
+    const map = mapRef.current;
+
+    for (const quartier of quartiers) {
+      map.setFeatureState(
+        { source: SOURCE_ID, id: quartier.slug },
+        {
+          selected: quartier.slug === selectedSlug,
+          aiMatch: aiMatchSlugs.includes(quartier.slug),
+        },
+      );
+
+      const isAiMatch = aiMatchSlugs.includes(quartier.slug);
+      const existingMarker = markersRef.current[quartier.slug];
+      if (isAiMatch && !existingMarker) {
+        const el = document.createElement("div");
+        el.innerHTML = SPARKLE_HTML;
+        const marker = new mapboxgl.Marker({ element: el })
+          .setLngLat([quartier.center_lng, quartier.center_lat])
+          .addTo(map);
+        markersRef.current[quartier.slug] = marker;
+      } else if (!isAiMatch && existingMarker) {
+        existingMarker.remove();
+        delete markersRef.current[quartier.slug];
+      }
     }
-    for (const [slug, marker] of Object.entries(markersRef.current)) {
-      marker.setMap(aiMatchSlugs.includes(slug) ? mapRef.current : null);
-    }
-  }, [ready, selectedSlug, aiMatchSlugs]);
+  }, [ready, quartiers, selectedSlug, aiMatchSlugs]);
 
   // Recenter when a quartier is selected.
   useEffect(() => {
     if (!ready || !mapRef.current || !selectedSlug) return;
     const quartier = quartiers.find((q) => q.slug === selectedSlug);
     if (!quartier) return;
-    mapRef.current.panTo({ lat: quartier.center_lat, lng: quartier.center_lng });
+    mapRef.current.easeTo({ center: [quartier.center_lng, quartier.center_lat] });
   }, [ready, selectedSlug, quartiers]);
 
   if (loadError) {
@@ -172,12 +193,18 @@ export function Map({ city, quartiers, selectedSlug, aiMatchSlugs, onSelectQuart
       <div className="absolute inset-0 flex items-center justify-center bg-surface-muted px-8 text-center">
         <p className="text-sm text-muted-foreground">
           {loadError === "missing-key"
-            ? "Clé Google Maps manquante. Ajoutez NEXT_PUBLIC_GOOGLE_MAPS_API_KEY dans .env.local."
+            ? "Clé Mapbox manquante. Ajoutez NEXT_PUBLIC_MAPBOX_TOKEN dans .env.local."
             : "Impossible de charger la carte."}
         </p>
       </div>
     );
   }
 
-  return <div ref={containerRef} className="absolute inset-0" />;
+  return (
+    // Inline position/inset (not Tailwind's .absolute/.inset-0 classes):
+    // Mapbox's own stylesheet sets `.mapboxgl-map { position: relative }` on
+    // this exact element once it mounts, which otherwise wins the cascade
+    // and collapses this container's height to its (empty) content size.
+    <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
+  );
 }

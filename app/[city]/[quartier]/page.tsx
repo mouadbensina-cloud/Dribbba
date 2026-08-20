@@ -2,11 +2,14 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { QuartierProfileScreen } from "@/components/QuartierProfileScreen";
 import { getCityBySlug, getQuartierDetail } from "@/lib/data";
+import { STATIC_CITY, STATIC_QUARTIERS } from "@/lib/staticData";
 
 // TODO: analytics — log a pageview for the quartier profile screen here
 // once an analytics provider is wired up.
 
-export const dynamic = "force-dynamic";
+export function generateStaticParams() {
+  return STATIC_QUARTIERS.map((q) => ({ city: STATIC_CITY.slug, quartier: q.slug }));
+}
 
 interface QuartierPageProps {
   params: Promise<{ city: string; quartier: string }>;

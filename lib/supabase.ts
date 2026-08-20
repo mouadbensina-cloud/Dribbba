@@ -1,5 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 
+// NOT CURRENTLY USED — lib/data.ts reads from lib/staticData.ts instead so
+// the app runs with zero external services. Kept ready for when you want to
+// switch to live Supabase data: see README "Decisions I made".
+//
 // Fall back to harmless placeholders so the client can always be constructed
 // (e.g. during `next build`, before real env vars are configured). Requests
 // made against the placeholder URL fail at runtime with a clear network

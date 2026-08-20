@@ -1,13 +1,14 @@
 import { notFound } from "next/navigation";
 import { MapHomeScreen } from "@/components/MapHomeScreen";
 import { getCityBySlug, getQuartiersForCity } from "@/lib/data";
+import { STATIC_CITY } from "@/lib/staticData";
 
 // TODO: analytics — log a pageview for the city map screen here once an
 // analytics provider is wired up.
 
-// Data is fetched live from Supabase per request rather than statically
-// generated, since quartier data can change without a redeploy.
-export const dynamic = "force-dynamic";
+export function generateStaticParams() {
+  return [{ city: STATIC_CITY.slug }];
+}
 
 interface CityPageProps {
   params: Promise<{ city: string }>;
