@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { getCityAiDataset, getCityBySlug } from "@/lib/data";
 
 export const runtime = "nodejs";
 
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+const COHERE_MODEL = process.env.COHERE_MODEL || "command-r-plus-08-2024";
 const MAX_MESSAGES = 20;
 const MAX_MESSAGE_LENGTH = 2000;
 
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+}
+
+interface CohereChatResponse {
+  message?: { content?: { type: string; text?: string }[] };
 }
 
 function buildSystemPrompt(cityName: string, dataset: unknown) {
@@ -52,10 +55,10 @@ function extractMatches(text: string, validSlugs: Set<string>): { reply: string;
 }
 
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.COHERE_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY n'est pas configurée sur le serveur." },
+      { error: "COHERE_API_KEY n'est pas configurée sur le serveur." },
       { status: 500 },
     );
   }
@@ -93,18 +96,34 @@ export async function POST(request: NextRequest) {
   const dataset = await getCityAiDataset(city.id);
   const validSlugs = new Set(dataset.map((q) => q.slug));
 
-  const anthropic = new Anthropic({ apiKey });
-
   try {
-    const response = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
-      system: buildSystemPrompt(city.name, dataset),
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    const cohereRes = await fetch("https://api.cohere.com/v2/chat", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: COHERE_MODEL,
+        messages: [
+          { role: "system", content: buildSystemPrompt(city.name, dataset) },
+          ...messages.map((m) => ({ role: m.role, content: m.content })),
+        ],
+      }),
     });
 
-    const text = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    if (!cohereRes.ok) {
+      const errBody = await cohereRes.text();
+      console.error("Cohere API error", cohereRes.status, errBody);
+      return NextResponse.json(
+        { error: "L'assistant est momentanément indisponible." },
+        { status: 502 },
+      );
+    }
+
+    const data: CohereChatResponse = await cohereRes.json();
+    const text = (data.message?.content ?? [])
+      .filter((block) => block.type === "text" && typeof block.text === "string")
       .map((block) => block.text)
       .join("\n")
       .trim();
@@ -113,7 +132,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ reply, matches });
   } catch (error) {
-    console.error("Anthropic API error", error);
+    console.error("Cohere API error", error);
     return NextResponse.json(
       { error: "L'assistant est momentanément indisponible." },
       { status: 502 },

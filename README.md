@@ -3,7 +3,7 @@
 Mobile-first neighborhood discovery for Moroccan cities. v1 ships with
 Casablanca only, editorial content, no accounts. Built with Next.js (App
 Router), Tailwind CSS, static content (no database required), Mapbox GL JS,
-and Claude (Anthropic API) for the "Ask AI" screen.
+and Cohere for the "Ask AI" screen.
 
 ## Stack
 
@@ -11,7 +11,7 @@ and Claude (Anthropic API) for the "Ask AI" screen.
 - Tailwind CSS v4
 - Static in-repo content (`lib/staticData.ts`) — no database round-trip
 - Mapbox GL JS (`mapbox-gl`)
-- Anthropic API (`@anthropic-ai/sdk`) via a server-side `/api/chat` route
+- Cohere Chat API (v2, called directly via `fetch`) via a server-side `/api/chat` route
 - framer-motion for the draggable bottom sheet
 
 ## Setup
@@ -27,10 +27,10 @@ npm install
 Create a free account at [mapbox.com](https://mapbox.com) and copy a public
 token (starts with `pk.`) from [account.mapbox.com/access-tokens](https://account.mapbox.com/access-tokens/).
 
-### 3. (Optional) Get an Anthropic API key
+### 3. (Optional) Get a Cohere API key
 
 Only needed for the Ask AI screen to actually respond — the map and profile
-pages work without it. Create a key at [console.anthropic.com](https://console.anthropic.com).
+pages work without it. Create a key at [dashboard.cohere.com/api-keys](https://dashboard.cohere.com/api-keys).
 This key is server-side only (used in `app/api/chat/route.ts`) and is never
 sent to the client.
 
@@ -44,8 +44,8 @@ cp .env.example .env.local
 
 ```
 NEXT_PUBLIC_MAPBOX_TOKEN=pk...
-ANTHROPIC_API_KEY=              # optional, only for Ask AI
-ANTHROPIC_MODEL=claude-sonnet-5 # optional override
+COHERE_API_KEY=                          # optional, only for Ask AI
+COHERE_MODEL=command-r-plus-08-2024      # optional override
 ```
 
 ### 5. Run it
@@ -56,7 +56,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) — it redirects to
 `/casablanca`. The map and all 3 quartier profiles work immediately with
-just the Mapbox token. Without `ANTHROPIC_API_KEY`, the Ask AI screen shows
+just the Mapbox token. Without `COHERE_API_KEY`, the Ask AI screen shows
 a clear inline error instead of a response — everything else is unaffected.
 
 ## Project structure
@@ -67,7 +67,7 @@ app/
   [city]/page.tsx             → Screen 1: Map Home
   [city]/[quartier]/page.tsx  → Screen 2: Quartier Profile
   [city]/ask-ai/page.tsx      → Screen 3: Ask AI (fullscreen chat)
-  api/chat/route.ts           → server-side Anthropic proxy
+  api/chat/route.ts           → server-side Cohere proxy
 components/                   → Map, BottomSheet, RatingBar(s), StatGrid,
                                  TopControls, ChatInterface, etc.
 lib/
@@ -101,7 +101,7 @@ them silent:
   static, `/[city]`, `/[city]/[quartier]`, and `/[city]/ask-ai` all use
   `generateStaticParams` and prerender at build time — no server round-trip
   to view them. Only `/api/chat` is server-rendered on demand, since it
-  calls the Anthropic API live.
+  calls the Cohere API live.
 - **Mapbox container sizing.** Mapbox GL's own stylesheet sets
   `position: relative` on the exact `<div>` you hand it as a container,
   which silently overrides Tailwind's `.absolute`/`.inset-0` utility classes
@@ -109,9 +109,15 @@ them silent:
   `inset` via inline style instead (inline styles always win the cascade),
   plus a `ResizeObserver` that calls `map.resize()` if the container's
   measured size settles after Mapbox's first read.
-- **AI model id.** The spec named "Claude Sonnet 4.6", which isn't a real
-  model id. `/api/chat` defaults to `claude-sonnet-5` (the current flagship)
-  and is overridable via `ANTHROPIC_MODEL` in `.env.local`.
+- **Cohere instead of Claude for Ask AI.** The spec called for the Anthropic
+  API (naming "Claude Sonnet 4.6", which isn't a real model id). Swapped to
+  Cohere's Chat API v2 on request, using a test key. `/api/chat` calls
+  `https://api.cohere.com/v2/chat` directly via `fetch` (no SDK needed) with
+  the quartier dataset as a `system` message — same prompt, same
+  `{"matches": [...]}` contract either provider. Defaults to
+  `command-r-plus-08-2024`, overridable via `COHERE_MODEL`. Swapping back to
+  Claude (or any other provider) only touches `app/api/chat/route.ts` — the
+  request/response contract with `ChatInterface.tsx` doesn't change.
 - **Non-streaming chat.** `/api/chat` returns a single JSON response rather
   than streaming tokens. Simpler and reliable for v1; streaming can be added
   later without changing the request contract.
@@ -153,5 +159,5 @@ vercel
 
 Or connect the repo in the Vercel dashboard and set the env vars from
 `.env.example` under Project Settings → Environment Variables
-(`ANTHROPIC_API_KEY` stays server-side automatically since it lacks the
+(`COHERE_API_KEY` stays server-side automatically since it lacks the
 `NEXT_PUBLIC_` prefix).
