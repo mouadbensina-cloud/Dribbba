@@ -12,6 +12,7 @@ import type {
   QuartierPhotoRow,
   QuartierProConRow,
 } from "./types";
+import realArrondissementRings from "./geo/casablanca-arrondissements.json";
 
 export const STATIC_CITY: City = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -289,12 +290,21 @@ const DETAILED_QUARTIERS: QuartierDetail[] = [
 
 // ─── Lightweight quartiers ──────────────────────────────────────────────
 // The rest of Casablanca's named districts, so the whole city is clickable
-// on the map. Coordinates are approximate (small placeholder polygons
-// centered on each district's rough real-world location, per general
-// knowledge — not surveyed boundaries). Stats come from one of a few
+// on the map. Stats (ratings/prices/essentials) come from one of a few
 // "character" templates rather than being hand-tuned per district; commute
-// durations are estimated from straight-line distance. Swap in real,
-// verified data before any real launch — see README "Decisions I made".
+// durations are estimated from straight-line distance. Two tiers of
+// geographic accuracy:
+//  - 16 slugs match an official arrondissement (Casablanca's real
+//    administrative subdivisions) and get their exact surveyed boundary
+//    from OpenStreetMap, via REAL_ARRONDISSEMENT_BOUNDARIES below.
+//  - The rest are informal, commonly-used neighborhood names with no
+//    official boundary anywhere (including in OpenStreetMap — they're only
+//    ever mapped as a single point, because their extent is genuinely
+//    fuzzy in real life). For the ones OSM has a point for, POINT_FIXES
+//    corrects the center coordinate; the polygon itself stays an
+//    approximate placeholder shape around that corrected point.
+// Swap in real per-district content before any real launch — see README
+// "Decisions I made".
 
 type Template = "upscale-coastal" | "central-chic" | "popular-central" | "residential-family";
 
@@ -482,12 +492,57 @@ const LIGHTWEIGHT_INPUT: [string, string, number, number, Template][] = [
   ["Bouskoura", "bouskoura", 33.445, -7.65, "residential-family"],
   ["Nouaceur", "nouaceur", 33.365, -7.585, "residential-family"],
   ["Zenata", "zenata", 33.68, -7.47, "residential-family"],
+  ["Ain Chock", "ain-chock", 33.5445, -7.605, "residential-family"],
 ];
 
+// Real point coordinates from OpenStreetMap (place=quarter/suburb nodes),
+// correcting the rough estimates above for informal names that don't have
+// an official boundary to use instead. [lat, lng].
+const POINT_FIXES: Record<string, [number, number]> = {
+  racine: [33.5896092, -7.6407011],
+  cil: [33.5724839, -7.6577176],
+  "val-danfa": [33.5949159, -7.6543731],
+  beausejour: [33.5684105, -7.6492935],
+  californie: [33.5411922, -7.626038],
+  "derb-ghallef": [33.5736066, -7.6296039],
+  "ancienne-medina": [33.6007224, -7.6203326],
+  oasis: [33.5589388, -7.6386245],
+  polo: [33.5587054, -7.6163969],
+  "triangle-dor": [33.5883665, -7.6381283],
+  "centre-ville": [33.5906153, -7.6139096],
+  "ain-diab": [33.5811626, -7.6843877],
+  "val-fleuri": [33.5748756, -7.6369836],
+  palmier: [33.5806544, -7.6289276],
+  lissasfa: [33.5314545, -7.6724261],
+  oulfa: [33.5544751, -7.6797967],
+};
+
+const REAL_BOUNDARIES = realArrondissementRings as unknown as Record<string, [number, number][]>;
+
+function ringCentroid(ring: [number, number][]): [number, number] {
+  const lats = ring.map(([, lat]) => lat);
+  const lngs = ring.map(([lng]) => lng);
+  return [
+    lats.reduce((a, b) => a + b, 0) / lats.length,
+    lngs.reduce((a, b) => a + b, 0) / lngs.length,
+  ];
+}
+
+function ringToPolygon(ring: [number, number][]): QuartierDetail["polygon"] {
+  return { type: "Polygon", coordinates: [ring] };
+}
+
 const LIGHTWEIGHT_QUARTIERS: QuartierDetail[] = LIGHTWEIGHT_INPUT.map(
-  ([name, slug, lat, lng, template], i) => {
+  ([name, slug, estimatedLat, estimatedLng, template], i) => {
     const id = `lightweight-${slug}`;
     const t = TEMPLATES[template];
+
+    const realBoundary = REAL_BOUNDARIES[slug];
+    const [lat, lng] = realBoundary
+      ? ringCentroid(realBoundary)
+      : (POINT_FIXES[slug] ?? [estimatedLat, estimatedLng]);
+    const polygon = realBoundary ? ringToPolygon(realBoundary) : smallPolygon(lat, lng);
+
     return {
       id,
       city_id: STATIC_CITY.id,
@@ -495,7 +550,7 @@ const LIGHTWEIGHT_QUARTIERS: QuartierDetail[] = LIGHTWEIGHT_INPUT.map(
       slug,
       one_liner: t.blurb,
       description: t.blurb,
-      polygon: smallPolygon(lat, lng),
+      polygon,
       center_lat: lat,
       center_lng: lng,
       price_buy_per_sqm: t.priceBuyPerSqm,

@@ -72,7 +72,8 @@ components/                   → Map, BottomSheet, RatingBar(s), StatGrid,
                                  TopControls, ChatInterface, etc.
 lib/
   data.ts                     → data access layer, reads lib/staticData.ts
-  staticData.ts                → the actual content (1 city, 46 quartiers)
+  staticData.ts                → the actual content (1 city, 47 quartiers)
+  geo/casablanca-arrondissements.json → real boundary shapes (16 arrondissements)
   types.ts                    → shared row/entity types
   constants.ts                → rating/essential labels, icons, ordering
   supabase.ts                  → unused for now, kept for a later DB swap
@@ -87,21 +88,38 @@ A few points were left to reasonable judgment, or changed after the initial
 build per follow-up direction; documenting them here rather than leaving
 them silent:
 
-- **46 quartiers, 3 "full" + 43 "lightweight."** On request, every named
+- **47 quartiers, 3 "full" + 44 "lightweight."** On request, every named
   district of Casablanca is now active/clickable on the map, not just the
   original 3. Bourgogne, Sidi Maarouf, and Gauthier keep their hand-authored
-  content (unique photos, description, pros/cons). The other 43 in
+  content (unique photos, description, pros/cons). The other 44 in
   `lib/staticData.ts` are generated from 4 "character" templates
   (upscale-coastal / central-chic / popular-central / residential-family) —
   a template supplies all 8 ratings, prices, and essentials counts, so
   every profile page still renders fully rather than looking broken/empty.
-  Their polygon centers are approximate (from general geographic knowledge,
-  not surveyed data), commute times are estimated from straight-line
-  distance to 3 fixed reference points, and their gallery photos array is
-  empty (the profile page already hides that section when empty). Treat
-  these 43 as placeholders to replace with real per-quartier content later,
-  the same way the original 3 were meant to be replaced before a real
-  launch.
+  Commute times are estimated from straight-line distance to 3 fixed
+  reference points, and their gallery photos array is empty (the profile
+  page already hides that section when empty). Treat these 44 as
+  placeholders to replace with real per-quartier content later, the same
+  way the original 3 were meant to be replaced before a real launch.
+- **16 of those 44 use real, surveyed boundary shapes; the other 28 don't,
+  because none exist.** Casablanca has 16 official arrondissements
+  (administrative subdivisions — Anfa, Maârif, Al Fida, Ain Chock, Ain
+  Sebaâ, Ben M'Sick, Hay Hassani, Hay Mohammadi, Mers Sultan, Moulay Rachid,
+  Roches Noires, Sbata, Sidi Belyout, Sidi Bernoussi, Sidi Moumen, Sidi
+  Othmane); their exact boundaries are public OpenStreetMap data, fetched
+  via `polygons.openstreetmap.fr`, Douglas-Peucker-simplified to ~10-70
+  points each, and checked into `lib/geo/casablanca-arrondissements.json`
+  (~8 KB). The other 28 lightweight quartiers are informal, commonly-used
+  neighborhood names (Gauthier's neighbors like Racine, CIL, Val Fleuri,
+  Belvédère, etc.) that have no official boundary anywhere — even
+  OpenStreetMap only has a single point for most of them, since their
+  extent is genuinely undefined in real life, not just unmapped. For the 16
+  of those 28 that OSM does have a point for, `POINT_FIXES` in
+  `lib/staticData.ts` corrects the center coordinate to that real point;
+  the polygon itself is still an approximate placeholder shape around it.
+  The remaining 12 (Corniche, Dar Bouazza, Belvédère, Habous, Derb Omar,
+  Derb Sultan, Errahma, Nassim, Mediouna, Bouskoura, Nouaceur, Zenata) use
+  the original estimated coordinates, unverified against any source.
 - **Static content instead of Supabase, and Mapbox instead of Google Maps.**
   The original spec called for a Supabase-backed data layer and the Google
   Maps JavaScript API. Both were swapped out on request, to get a fully
@@ -165,8 +183,9 @@ them silent:
   page components.
 - Only Casablanca is seeded; the schema/types support more cities/countries
   without restructuring.
-- 43 of the 46 quartiers use generated placeholder content (see "Decisions
-  I made" above), not verified real-world data.
+- 44 of the 47 quartiers use generated placeholder content, and 28 of those
+  44 also use an approximate (not surveyed) polygon shape — see "Decisions
+  I made" above.
 
 ## Deploying to Vercel
 
