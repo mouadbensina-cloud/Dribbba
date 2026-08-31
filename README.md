@@ -88,6 +88,28 @@ A few points were left to reasonable judgment, or changed after the initial
 build per follow-up direction; documenting them here rather than leaving
 them silent:
 
+- **Quartiers are pills/dots by default, shapes only on selection.** On
+  request, the map no longer shows every polygon outline at once (too
+  cluttered at 47 quartiers). At rest, each quartier is a small dot; at
+  zoom ≥ 13 those dots expand into named pills (`icon-text-fit` capsule
+  images, Airbnb-style), using Mapbox's own label-collision system so fewer
+  names show when zoomed out and more appear as you zoom in — no clustering
+  library needed. A quartier's actual polygon (fill + outline) only
+  renders once it's selected; selecting one also hides that one's dot/pill
+  via `setFilter`, since the shape is now the indicator.
+- **Mapbox GL feature-state needs numeric feature ids.** Discovered while
+  building the above: a GeoJSON source's features had `id: quartier.slug`
+  (a string) — the source data keeps it fine, but `setFeatureState` /
+  `queryRenderedFeatures` then silently can't find it on the rendered
+  feature (confirmed empirically against mapbox-gl 3.29; not documented
+  anywhere obvious). Switched to the array index as a numeric id;
+  `slug` still lives in `properties` for click handling and filters, which
+  read fine as either a string or number.
+- **Mapbox's "load" event can hang forever on a spotty network; "style.load"
+  doesn't.** `load` waits for literally everything (every tile, every
+  source) to finish, which never happened reliably in this dev sandbox.
+  `style.load` only waits for the style spec/sprite/glyphs, which is all
+  that's needed before calling `addSource`/`addLayer` — switched to that.
 - **47 quartiers, 3 "full" + 44 "lightweight."** On request, every named
   district of Casablanca is now active/clickable on the map, not just the
   original 3. Bourgogne, Sidi Maarouf, and Gauthier keep their hand-authored
