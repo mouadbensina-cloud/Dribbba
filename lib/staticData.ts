@@ -88,7 +88,11 @@ function essentials(
   );
 }
 
-export const STATIC_QUARTIERS: QuartierDetail[] = [
+// The 3 original quartiers, fully hand-authored (unique photos, pros/cons,
+// description). Below this, LIGHTWEIGHT_QUARTIERS covers the rest of
+// Casablanca's named districts with generated placeholder data — see that
+// section and README "Decisions I made".
+const DETAILED_QUARTIERS: QuartierDetail[] = [
   {
     id: BOURGOGNE_ID,
     city_id: STATIC_CITY.id,
@@ -282,3 +286,230 @@ export const STATIC_QUARTIERS: QuartierDetail[] = [
     }),
   },
 ];
+
+// ─── Lightweight quartiers ──────────────────────────────────────────────
+// The rest of Casablanca's named districts, so the whole city is clickable
+// on the map. Coordinates are approximate (small placeholder polygons
+// centered on each district's rough real-world location, per general
+// knowledge — not surveyed boundaries). Stats come from one of a few
+// "character" templates rather than being hand-tuned per district; commute
+// durations are estimated from straight-line distance. Swap in real,
+// verified data before any real launch — see README "Decisions I made".
+
+type Template = "upscale-coastal" | "central-chic" | "popular-central" | "residential-family";
+
+const TEMPLATES: Record<
+  Template,
+  {
+    ratings: QuartierDetail["ratings"];
+    priceBuyPerSqm: number;
+    priceRent2br: number;
+    essentials: Record<QuartierEssentialRow["category"], number>;
+    pro: string;
+    con: string;
+    blurb: string;
+  }
+> = {
+  "upscale-coastal": {
+    ratings: {
+      safety_day: 5,
+      safety_night: 4,
+      noise: 2,
+      cleanliness: 5,
+      walkability: 4,
+      family_friendly: 4,
+      nightlife: 3,
+      traffic: 3,
+    },
+    priceBuyPerSqm: 24000,
+    priceRent2br: 11000,
+    essentials: { schools: 3, clinics: 3, pharmacies: 6, supermarkets: 5, mosques: 3, parks: 3 },
+    pro: "Quartier résidentiel huppé, proche du littoral",
+    con: "Prix de l'immobilier parmi les plus élevés de la ville",
+    blurb: "Quartier résidentiel chic de Casablanca, prisé pour son cadre de vie et sa proximité avec la côte.",
+  },
+  "central-chic": {
+    ratings: {
+      safety_day: 4,
+      safety_night: 4,
+      noise: 3,
+      cleanliness: 4,
+      walkability: 5,
+      family_friendly: 3,
+      nightlife: 4,
+      traffic: 4,
+    },
+    priceBuyPerSqm: 19000,
+    priceRent2br: 9000,
+    essentials: { schools: 3, clinics: 4, pharmacies: 8, supermarkets: 6, mosques: 3, parks: 2 },
+    pro: "Central et très marchable, bien pourvu en commerces",
+    con: "Circulation dense aux heures de pointe",
+    blurb: "Quartier central et animé de Casablanca, bien desservi et recherché pour son emplacement.",
+  },
+  "popular-central": {
+    ratings: {
+      safety_day: 3,
+      safety_night: 2,
+      noise: 4,
+      cleanliness: 2,
+      walkability: 4,
+      family_friendly: 3,
+      nightlife: 2,
+      traffic: 3,
+    },
+    priceBuyPerSqm: 12000,
+    priceRent2br: 5500,
+    essentials: { schools: 4, clinics: 2, pharmacies: 6, supermarkets: 3, mosques: 8, parks: 1 },
+    pro: "Quartier vivant et authentique, très animé",
+    con: "Propreté et infrastructures inégales selon les rues",
+    blurb: "Quartier populaire et dense du centre de Casablanca, à l'ambiance authentique.",
+  },
+  "residential-family": {
+    ratings: {
+      safety_day: 4,
+      safety_night: 3,
+      noise: 2,
+      cleanliness: 3,
+      walkability: 3,
+      family_friendly: 4,
+      nightlife: 1,
+      traffic: 2,
+    },
+    priceBuyPerSqm: 9000,
+    priceRent2br: 4000,
+    essentials: { schools: 5, clinics: 2, pharmacies: 4, supermarkets: 3, mosques: 5, parks: 2 },
+    pro: "Quartier calme et familial",
+    con: "Plus éloigné du centre-ville et des zones d'emploi",
+    blurb: "Quartier résidentiel familial de Casablanca, calme et principalement composé d'habitations.",
+  },
+};
+
+// Confirmed-reachable Unsplash placeholder photos, cycled by index.
+const PHOTO_POOL = [
+  "https://images.unsplash.com/photo-1539020140153-e479b8c22e70?w=1200&q=80",
+  "https://images.unsplash.com/photo-1553603227-2358aabe821e?w=1200&q=80",
+  "https://images.unsplash.com/photo-1554502078-ef0fc409efce?w=1200&q=80",
+  "https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?w=1200&q=80",
+  "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=1200&q=80",
+  "https://images.unsplash.com/photo-1518156677180-95a2893f3e9f?w=1200&q=80",
+  "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=1200&q=80",
+  "https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=1200&q=80",
+  "https://images.unsplash.com/photo-1444723121867-7a241cacace9?w=1200&q=80",
+  "https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=1200&q=80",
+];
+
+const COMMUTE_REFERENCE_POINTS: [string, number, number][] = [
+  ["Centre-ville", 33.5931, -7.6184],
+  ["Casa Finance City", 33.527, -7.642],
+  ["Aéroport", 33.3675, -7.5898],
+];
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function estimatedCommuteMinutes(lat: number, lng: number): [string, number][] {
+  return COMMUTE_REFERENCE_POINTS.map(([point, refLat, refLng]) => {
+    const km = haversineKm(lat, lng, refLat, refLng);
+    const minutes = Math.max(5, Math.round((5 + km * 2.2) / 5) * 5);
+    return [point, minutes];
+  });
+}
+
+function smallPolygon(lat: number, lng: number, dLat = 0.004, dLng = 0.005): QuartierDetail["polygon"] {
+  return {
+    type: "Polygon",
+    coordinates: [
+      [
+        [lng - dLng, lat + dLat],
+        [lng + dLng, lat + dLat],
+        [lng + dLng * 0.7, lat - dLat],
+        [lng - dLng * 0.7, lat - dLat],
+        [lng - dLng, lat + dLat],
+      ],
+    ],
+  };
+}
+
+// [name, slug, lat, lng, template]
+const LIGHTWEIGHT_INPUT: [string, string, number, number, Template][] = [
+  ["Anfa", "anfa", 33.589, -7.65, "upscale-coastal"],
+  ["Ain Diab", "ain-diab", 33.592, -7.665, "upscale-coastal"],
+  ["Corniche", "corniche", 33.5945, -7.671, "upscale-coastal"],
+  ["Racine", "racine", 33.587, -7.63, "upscale-coastal"],
+  ["Val d'Anfa", "val-danfa", 33.582, -7.642, "upscale-coastal"],
+  ["Triangle d'Or", "triangle-dor", 33.5895, -7.628, "upscale-coastal"],
+  ["Dar Bouazza", "dar-bouazza", 33.555, -7.755, "upscale-coastal"],
+  ["Californie", "californie", 33.57, -7.635, "central-chic"],
+  ["CIL", "cil", 33.575, -7.63, "central-chic"],
+  ["Polo", "polo", 33.568, -7.63, "central-chic"],
+  ["Maarif", "maarif", 33.572, -7.647, "central-chic"],
+  ["Palmier", "palmier", 33.574, -7.635, "central-chic"],
+  ["Beauséjour", "beausejour", 33.568, -7.625, "central-chic"],
+  ["Val Fleuri", "val-fleuri", 33.565, -7.628, "central-chic"],
+  ["Mers Sultan", "mers-sultan", 33.585, -7.61, "central-chic"],
+  ["Belvédère", "belvedere", 33.582, -7.6, "central-chic"],
+  ["Oasis", "oasis", 33.555, -7.63, "central-chic"],
+  ["Centre-Ville", "centre-ville", 33.593, -7.618, "popular-central"],
+  ["Sidi Belyout", "sidi-belyout", 33.6, -7.62, "popular-central"],
+  ["Habous", "habous", 33.578, -7.605, "popular-central"],
+  ["Ancienne Médina", "ancienne-medina", 33.602, -7.618, "popular-central"],
+  ["Derb Omar", "derb-omar", 33.595, -7.605, "popular-central"],
+  ["Derb Ghallef", "derb-ghallef", 33.57, -7.612, "popular-central"],
+  ["Derb Sultan", "derb-sultan", 33.575, -7.595, "popular-central"],
+  ["Al Fida", "al-fida", 33.58, -7.59, "popular-central"],
+  ["Ben M'Sick", "ben-msick", 33.555, -7.578, "popular-central"],
+  ["Hay Mohammadi", "hay-mohammadi", 33.598, -7.57, "residential-family"],
+  ["Roches Noires", "roches-noires", 33.605, -7.585, "residential-family"],
+  ["Ain Sebaa", "ain-sebaa", 33.615, -7.535, "residential-family"],
+  ["Sidi Bernoussi", "sidi-bernoussi", 33.625, -7.51, "residential-family"],
+  ["Sidi Moumen", "sidi-moumen", 33.59, -7.53, "residential-family"],
+  ["Sidi Othmane", "sidi-othmane", 33.565, -7.555, "residential-family"],
+  ["Sbata", "sbata", 33.545, -7.57, "residential-family"],
+  ["Moulay Rachid", "moulay-rachid", 33.57, -7.535, "residential-family"],
+  ["Hay Hassani", "hay-hassani", 33.545, -7.66, "residential-family"],
+  ["Lissasfa", "lissasfa", 33.53, -7.645, "residential-family"],
+  ["Errahma", "errahma", 33.51, -7.67, "residential-family"],
+  ["Oulfa", "oulfa", 33.558, -7.685, "residential-family"],
+  ["Nassim", "nassim", 33.55, -7.675, "residential-family"],
+  ["Mediouna", "mediouna", 33.495, -7.545, "residential-family"],
+  ["Bouskoura", "bouskoura", 33.445, -7.65, "residential-family"],
+  ["Nouaceur", "nouaceur", 33.365, -7.585, "residential-family"],
+  ["Zenata", "zenata", 33.68, -7.47, "residential-family"],
+];
+
+const LIGHTWEIGHT_QUARTIERS: QuartierDetail[] = LIGHTWEIGHT_INPUT.map(
+  ([name, slug, lat, lng, template], i) => {
+    const id = `lightweight-${slug}`;
+    const t = TEMPLATES[template];
+    return {
+      id,
+      city_id: STATIC_CITY.id,
+      name,
+      slug,
+      one_liner: t.blurb,
+      description: t.blurb,
+      polygon: smallPolygon(lat, lng),
+      center_lat: lat,
+      center_lng: lng,
+      price_buy_per_sqm: t.priceBuyPerSqm,
+      price_rent_2br: t.priceRent2br,
+      hero_photo_url: PHOTO_POOL[i % PHOTO_POOL.length],
+      author_type: "editorial",
+      created_at: "2026-01-01T00:00:00.000Z",
+      ratings: t.ratings,
+      photos: [],
+      prosCons: prosCons(id, [t.pro], [t.con]),
+      commute: commute(id, estimatedCommuteMinutes(lat, lng)),
+      essentials: essentials(id, t.essentials),
+    };
+  },
+);
+
+export const STATIC_QUARTIERS: QuartierDetail[] = [...DETAILED_QUARTIERS, ...LIGHTWEIGHT_QUARTIERS];
