@@ -49,6 +49,14 @@ function toFeatureCollection(quartiers: QuartierSummary[]): GeoJSON.FeatureColle
   };
 }
 
+function polygonBounds(polygon: QuartierSummary["polygon"]): mapboxgl.LngLatBounds {
+  const bounds = new mapboxgl.LngLatBounds();
+  for (const ring of polygon.coordinates) {
+    for (const [lng, lat] of ring) bounds.extend([lng, lat]);
+  }
+  return bounds;
+}
+
 function toPointFeatureCollection(quartiers: QuartierSummary[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -327,12 +335,31 @@ export function Map({ city, quartiers, selectedSlug, aiMatchSlugs, onSelectQuart
     if (map.getLayer(PILL_LAYER_ID)) map.setFilter(PILL_LAYER_ID, hideSelectedFilter);
   }, [ready, quartiers, selectedSlug, aiMatchSlugs]);
 
-  // Recenter when a quartier is selected.
+  // Frame the selected quartier's actual shape when it's selected, instead
+  // of a fixed zoom bump — fitBounds sizes the zoom to the shape itself, so
+  // tiny placeholder polygons and huge arrondissements both end up
+  // reasonably framed. Selecting opens the bottom sheet's "preview" state,
+  // which covers the bottom ~45% of the screen (see BottomSheet's PREVIEW
+  // fraction) — asymmetric padding keeps the shape inside the space that's
+  // actually still visible, instead of centered behind the sheet.
   useEffect(() => {
     if (!ready || !mapRef.current || !selectedSlug) return;
+    const map = mapRef.current;
     const quartier = quartiers.find((q) => q.slug === selectedSlug);
     if (!quartier) return;
-    mapRef.current.easeTo({ center: [quartier.center_lng, quartier.center_lat] });
+
+    const containerHeight = map.getContainer().clientHeight;
+
+    map.fitBounds(polygonBounds(quartier.polygon), {
+      padding: {
+        top: 110,
+        bottom: containerHeight * 0.48,
+        left: 32,
+        right: 32,
+      },
+      maxZoom: 16,
+      duration: 500,
+    });
   }, [ready, selectedSlug, quartiers]);
 
   if (loadError) {

@@ -97,6 +97,16 @@ them silent:
   library needed. A quartier's actual polygon (fill + outline) only
   renders once it's selected; selecting one also hides that one's dot/pill
   via `setFilter`, since the shape is now the indicator.
+- **Selecting a quartier frames its shape with `fitBounds`, not a fixed zoom
+  bump.** A flat "zoom in one level" doesn't account for how big the
+  selected shape actually is (a tiny placeholder polygon vs. a large
+  arrondissement) or how zoomed in the user already was — it either barely
+  moves or wildly over-zooms. `fitBounds(polygonBounds(quartier.polygon), …)`
+  sizes the zoom to the shape itself. Its `padding` is asymmetric — small on
+  top, ~48% of the container height on the bottom — to match the bottom
+  sheet's "preview" state (see BottomSheet's PREVIEW fraction), so the
+  shape lands fully inside the space still visible above the sheet instead
+  of being centered behind it.
 - **Mapbox GL feature-state needs numeric feature ids.** Discovered while
   building the above: a GeoJSON source's features had `id: quartier.slug`
   (a string) — the source data keeps it fine, but `setFeatureState` /
