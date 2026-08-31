@@ -13,6 +13,7 @@ import type {
   QuartierProConRow,
 } from "./types";
 import realArrondissementRings from "./geo/casablanca-arrondissements.json";
+import quartierPriceOverrides from "./quartierPrices.json";
 
 export const STATIC_CITY: City = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -567,4 +568,32 @@ const LIGHTWEIGHT_QUARTIERS: QuartierDetail[] = LIGHTWEIGHT_INPUT.map(
   },
 );
 
-export const STATIC_QUARTIERS: QuartierDetail[] = [...DETAILED_QUARTIERS, ...LIGHTWEIGHT_QUARTIERS];
+// Real per-quartier prices scraped from Mubawab listings, layered on top of
+// the hand-authored/template defaults above where available — see
+// scripts/scrape-mubawab-prices.ts and README "Decisions I made". Missing
+// or stale entries just fall back to the defaults already set on each
+// quartier, so this file can be partial (some quartiers, or none at all).
+interface PriceOverride {
+  price_buy_per_sqm?: number;
+  price_rent_2br?: number;
+  updated_at?: string;
+  buy_sample_size?: number;
+  rent_sample_size?: number;
+}
+
+const PRICE_OVERRIDES = quartierPriceOverrides as Record<string, PriceOverride>;
+
+function applyPriceOverride(quartier: QuartierDetail): QuartierDetail {
+  const override = PRICE_OVERRIDES[quartier.slug];
+  if (!override) return quartier;
+  return {
+    ...quartier,
+    price_buy_per_sqm: override.price_buy_per_sqm ?? quartier.price_buy_per_sqm,
+    price_rent_2br: override.price_rent_2br ?? quartier.price_rent_2br,
+  };
+}
+
+export const STATIC_QUARTIERS: QuartierDetail[] = [
+  ...DETAILED_QUARTIERS,
+  ...LIGHTWEIGHT_QUARTIERS,
+].map(applyPriceOverride);

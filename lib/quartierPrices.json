@@ -1,0 +1,9 @@
+{
+  "racine": {
+    "price_buy_per_sqm": 20000,
+    "buy_sample_size": 25,
+    "price_rent_2br": 8500,
+    "rent_sample_size": 9,
+    "updated_at": "2026-08-31T13:48:11.799Z"
+  }
+}

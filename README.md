@@ -74,13 +74,46 @@ lib/
   data.ts                     → data access layer, reads lib/staticData.ts
   staticData.ts                → the actual content (1 city, 47 quartiers)
   geo/casablanca-arrondissements.json → real boundary shapes (16 arrondissements)
+  quartierPrices.json          → scraped achat/loyer medians, merged over the
+                                  defaults in staticData.ts (see scripts/ below)
   types.ts                    → shared row/entity types
   constants.ts                → rating/essential labels, icons, ordering
   supabase.ts                  → unused for now, kept for a later DB swap
+scripts/
+  scrape-mubawab-prices.ts    → Playwright scraper, writes lib/quartierPrices.json
 supabase/
   migrations/0001_init.sql    → schema + RLS policies (for a later DB swap)
   seed.sql                    → same content as staticData.ts, as SQL
 ```
+
+## Refreshing real prices (`scrape-mubawab-prices.ts`)
+
+`price_buy_per_sqm` and `price_rent_2br` in `lib/staticData.ts` are
+placeholder defaults (from the 4 character templates). A Playwright script
+scrapes real per-quartier medians from Mubawab.ma listings and writes them
+into `lib/quartierPrices.json`, which `staticData.ts` merges on top of those
+defaults automatically — no code changes or restart needed, just a rebuild.
+
+```bash
+npm run scrape:prices                    # scrape all 47 quartiers
+npm run scrape:prices -- --dry-run       # log only, write nothing
+npm run scrape:prices -- --quartier=racine  # one quartier only
+```
+
+It always launches a **visible** (non-headless) browser — if Mubawab shows a
+Cloudflare challenge, the script pauses and waits for you to solve it in
+that window, then continues once you press Enter. Between quartiers it waits
+20–40s, and 10–15s between the achat and loyer page loads within a quartier,
+to stay polite. A full run across all 47 is slow (there are pauses by
+design) — expect on the order of 30–45+ minutes, more if Cloudflare
+intervenes.
+
+**Known limitation:** Mubawab has its own curated quartier taxonomy, not a
+keyword search — the script guesses a Mubawab-style URL slug from each
+quartier's name (`mubawab.ma/fr/sd/casablanca/{slug}/appartements-a-vendre`).
+Many of our 47 won't have a match at all (confirmed: "bourgogne" 404s even
+though "racine" works) — those are logged and skipped, not forced. Expect a
+real run to fill in noticeably fewer than 47.
 
 ## Decisions I made
 
@@ -88,6 +121,24 @@ A few points were left to reasonable judgment, or changed after the initial
 build per follow-up direction; documenting them here rather than leaving
 them silent:
 
+- **Price scraper writes to `lib/quartierPrices.json`, not Supabase.** As
+  originally spec'd, the scraper was meant to write straight to Supabase.
+  Since the app runs entirely on static data (see below) and Supabase isn't
+  even connected right now, that would've written somewhere the live app
+  doesn't read from, and `supabase/seed.sql` only has 3 of the 47 quartiers
+  anyway. Confirmed with you and redirected the writes into a JSON override
+  file that `staticData.ts` merges on top of the template defaults — same
+  spirit (real scraped medians overriding placeholders), actually wired
+  into what's live. Also renamed the "loyer" field to match our existing
+  `price_rent_2br`, but note it's really an all-apartment-sizes median, not
+  filtered to 2-bedroom listings specifically — the spec didn't ask for
+  bedroom-count filtering, and adding it was out of scope for this pass.
+- **The scraper's URL pattern isn't the one in the original spec.**
+  `?keywords=...` doesn't filter anything — confirmed by watching it
+  silently redirect to the unfiltered national listing page. The site
+  actually uses path-based deep links per its own curated quartier list
+  (`/fr/sd/casablanca/{quartier}/appartements-a-vendre`), discovered by
+  using Mubawab's own location search UI and reading the resulting URL.
 - **Quartiers are pills/dots by default, shapes only on selection.** On
   request, the map no longer shows every polygon outline at once (too
   cluttered at 47 quartiers). At rest, each quartier is a small dot; at
