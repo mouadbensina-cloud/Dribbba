@@ -53,6 +53,34 @@ interface QuartierLocation {
   dLng: number;
 }
 
+interface PlaceResult {
+  displayName?: { text: string };
+  types?: string[];
+  location: { latitude: number; longitude: number };
+  viewport?: { low: { latitude: number; longitude: number }; high: { latitude: number; longitude: number } };
+}
+
+// Text Search ranks by text relevance, not place type — for a name like
+// "Nassim" or "Val d'Anfa" that's also a business/hotel/street name, the
+// top-ranked result is often a real estate office or a hotel, not the
+// neighborhood. Prefer an actual place-type result over the raw top hit;
+// reject pure commercial/POI results (hotel, store, clinic, restaurant,
+// ...) entirely rather than silently writing a business's address as a
+// neighborhood's coordinates.
+const PLACE_TYPE_TIERS: string[][] = [
+  ["neighborhood", "sublocality", "sublocality_level_1"],
+  ["locality", "administrative_area_level_3", "administrative_area_level_4"],
+  ["route", "premise", "street_address"],
+];
+
+function pickBestResult(places: PlaceResult[]): PlaceResult | null {
+  for (const tier of PLACE_TYPE_TIERS) {
+    const match = places.find((p) => (p.types ?? []).some((t) => tier.includes(t)));
+    if (match) return match;
+  }
+  return null;
+}
+
 function loadEnvLocal(): void {
   const envPath = path.join(__dirname, "..", ".env.local");
   if (!fs.existsSync(envPath)) return;
@@ -69,13 +97,18 @@ function clampDelta(degrees: number): number {
   return Math.min(MAX_DELTA, Math.max(MIN_DELTA, degrees));
 }
 
-async function lookupQuartier(name: string, cityName: string): Promise<QuartierLocation | { error: string }> {
+interface LookupSuccess extends QuartierLocation {
+  matchedName: string;
+  matchedTypes: string[];
+}
+
+async function lookupQuartier(name: string, cityName: string): Promise<LookupSuccess | { error: string }> {
   const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": API_KEY!,
-      "X-Goog-FieldMask": "places.location,places.viewport,places.displayName",
+      "X-Goog-FieldMask": "places.location,places.viewport,places.displayName,places.types",
     },
     body: JSON.stringify({ textQuery: `${name}, ${cityName}, Morocco` }),
   });
@@ -89,13 +122,17 @@ async function lookupQuartier(name: string, cityName: string): Promise<QuartierL
     return { error: "no results" };
   }
 
-  const place = data.places[0];
+  const place = pickBestResult(data.places);
+  if (!place) {
+    return { error: `no real-place result (only businesses/POIs: ${data.places.map((p: PlaceResult) => p.displayName?.text).join(", ")})` };
+  }
+
   const { latitude: lat, longitude: lng } = place.location;
   const viewport = place.viewport;
   const dLat = viewport ? clampDelta(Math.abs(viewport.high.latitude - viewport.low.latitude) / 2) : MIN_DELTA;
   const dLng = viewport ? clampDelta(Math.abs(viewport.high.longitude - viewport.low.longitude) / 2) : MIN_DELTA;
 
-  return { lat, lng, dLat, dLng };
+  return { lat, lng, dLat, dLng, matchedName: place.displayName?.text ?? "?", matchedTypes: place.types ?? [] };
 }
 
 function wait(ms: number): Promise<void> {
@@ -144,10 +181,11 @@ async function main() {
       console.log(`${name}: lookup failed (${result.error}), keeping existing estimate`);
     } else {
       console.log(
-        `${name}: ${result.lat.toFixed(6)}, ${result.lng.toFixed(6)} (via Google, box ±${result.dLat.toFixed(4)}/±${result.dLng.toFixed(4)})`,
+        `${name}: matched "${result.matchedName}" [${result.matchedTypes.join(",")}] at ${result.lat.toFixed(6)}, ${result.lng.toFixed(6)} (box ±${result.dLat.toFixed(4)}/±${result.dLng.toFixed(4)})`,
       );
       if (!DRY_RUN) {
-        locations[slug] = result;
+        const { lat, lng, dLat, dLng } = result;
+        locations[slug] = { lat, lng, dLat, dLng };
         save(locations);
       }
     }

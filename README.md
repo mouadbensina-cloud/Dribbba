@@ -145,6 +145,21 @@ them silent:
   enabled on top of that — confirmed by calling both directly, not
   assumed. `places.googleapis.com/v1/places:searchText` (POST + a field
   mask header) worked immediately, so the script uses that.
+- **The script prefers a real place-type result over the raw top hit, and
+  rejects pure-business results outright.** Text Search ranks by text
+  relevance, not place type — for a name that's also a business/hotel/road
+  name (Nassim, Val d'Anfa, Zenata, Triangle d'Or), the top-ranked result
+  was often a real estate office, a hotel, or a road, not the neighborhood
+  itself. Caught this by actually inspecting what each lookup matched
+  (`displayName`/`types`), not just trusting coordinates came back —
+  9 of the first 28 lookups were silently wrong this way, including
+  "Nassim" resolving to a specific office's street address ~4km from the
+  real district. Fixed with a type-tiered preference
+  (neighborhood/sublocality → locality/administrative area → route/premise
+  → reject) and an explicit failure when only businesses/POIs are found
+  (e.g. "Triangle d'Or" — a shopping mall by that name exists, the
+  district apparently isn't in Google's Places index under that query, so
+  it's skipped rather than pointed at the mall).
 - **Price scraper writes to `lib/quartierPrices.json`, not Supabase.** As
   originally spec'd, the scraper was meant to write straight to Supabase.
   Since the app runs entirely on static data (see below) and Supabase isn't
