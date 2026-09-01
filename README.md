@@ -251,6 +251,14 @@ them silent:
   to come from OSM's actual administrative-boundary data instead. It's a
   verified center point with a box sized to roughly the right extent, a
   real accuracy upgrade over guessing, not a claim of a real outline.
+  Confirmed there's no free/public source for the real shape either:
+  Google's own consumer Maps product renders a boundary for some informal
+  districts (e.g. Ancienne Médina) that its public API doesn't expose, and
+  a follow-up OSM search (any way/relation named "medina" or tagged
+  historic within 1.5km of it) came back empty too. Getting a real polygon
+  for a specific quartier means either manually digitizing coordinates
+  exported from Google Maps, or tracing one from a reference screenshot —
+  both one-off, per-quartier work, left undone for now.
 - **Static content instead of Supabase, and Mapbox instead of Google Maps.**
   The original spec called for a Supabase-backed data layer and the Google
   Maps JavaScript API. Both were swapped out on request, to get a fully
