@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "scrape:prices": "tsx scripts/scrape-mubawab-prices.ts"
+    "scrape:prices": "tsx scripts/scrape-mubawab-prices.ts",
+    "fetch:quartier-locations": "tsx scripts/fetch-quartier-locations.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

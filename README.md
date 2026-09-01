@@ -115,12 +115,36 @@ Many of our 47 won't have a match at all (confirmed: "bourgogne" 404s even
 though "racine" works) — those are logged and skipped, not forced. Expect a
 real run to fill in noticeably fewer than 47.
 
+## Refreshing quartier locations (`fetch-quartier-locations.ts`)
+
+The 28 informal-name quartiers (Racine, CIL, Zenata, etc. — see "Decisions
+I made" below) get their center point from the Places API (New) rather
+than a hand-typed guess. Needs `GOOGLE_PLACES_API_KEY` in `.env.local`.
+
+```bash
+npm run fetch:quartier-locations                          # all 28
+npm run fetch:quartier-locations -- --dry-run              # log only, write nothing
+npm run fetch:quartier-locations -- --quartier=zenata      # one quartier only
+```
+
+Writes `lib/geo/quartier-locations.json`, which `lib/staticData.ts` merges
+in automatically. Makes billed Google Maps Platform API calls (trivial
+cost for 28 lookups). A lookup that fails is logged and skipped — that
+quartier just keeps its previous coordinate rather than blocking the run.
+
 ## Decisions I made
 
 A few points were left to reasonable judgment, or changed after the initial
 build per follow-up direction; documenting them here rather than leaving
 them silent:
 
+- **`fetch-quartier-locations.ts` uses the Places API (New), not the
+  legacy endpoint.** The legacy `maps.googleapis.com/maps/api/place/...`
+  Text Search returned `REQUEST_DENIED` ("legacy API not enabled") against
+  the provided key, and legacy Geocoding separately required billing to be
+  enabled on top of that — confirmed by calling both directly, not
+  assumed. `places.googleapis.com/v1/places:searchText` (POST + a field
+  mask header) worked immediately, so the script uses that.
 - **Price scraper writes to `lib/quartierPrices.json`, not Supabase.** As
   originally spec'd, the scraper was meant to write straight to Supabase.
   Since the app runs entirely on static data (see below) and Supabase isn't
@@ -184,25 +208,34 @@ them silent:
   page already hides that section when empty). Treat these 44 as
   placeholders to replace with real per-quartier content later, the same
   way the original 3 were meant to be replaced before a real launch.
-- **16 of those 44 use real, surveyed boundary shapes; the other 28 don't,
-  because none exist.** Casablanca has 16 official arrondissements
-  (administrative subdivisions — Anfa, Maârif, Al Fida, Ain Chock, Ain
-  Sebaâ, Ben M'Sick, Hay Hassani, Hay Mohammadi, Mers Sultan, Moulay Rachid,
-  Roches Noires, Sbata, Sidi Belyout, Sidi Bernoussi, Sidi Moumen, Sidi
-  Othmane); their exact boundaries are public OpenStreetMap data, fetched
-  via `polygons.openstreetmap.fr`, Douglas-Peucker-simplified to ~10-70
-  points each, and checked into `lib/geo/casablanca-arrondissements.json`
-  (~8 KB). The other 28 lightweight quartiers are informal, commonly-used
-  neighborhood names (Gauthier's neighbors like Racine, CIL, Val Fleuri,
-  Belvédère, etc.) that have no official boundary anywhere — even
-  OpenStreetMap only has a single point for most of them, since their
-  extent is genuinely undefined in real life, not just unmapped. For the 16
-  of those 28 that OSM does have a point for, `POINT_FIXES` in
-  `lib/staticData.ts` corrects the center coordinate to that real point;
-  the polygon itself is still an approximate placeholder shape around it.
-  The remaining 12 (Corniche, Dar Bouazza, Belvédère, Habous, Derb Omar,
-  Derb Sultan, Errahma, Nassim, Mediouna, Bouskoura, Nouaceur, Zenata) use
-  the original estimated coordinates, unverified against any source.
+- **16 of those 44 use real, surveyed boundary shapes; the other 28 use a
+  Google-verified point, not a real shape.** Casablanca has 16 official
+  arrondissements (administrative subdivisions — Anfa, Maârif, Al Fida,
+  Ain Chock, Ain Sebaâ, Ben M'Sick, Hay Hassani, Hay Mohammadi, Mers
+  Sultan, Moulay Rachid, Roches Noires, Sbata, Sidi Belyout, Sidi
+  Bernoussi, Sidi Moumen, Sidi Othmane); their exact boundaries are public
+  OpenStreetMap data, fetched via `polygons.openstreetmap.fr`,
+  Douglas-Peucker-simplified to ~10-70 points each, and checked into
+  `lib/geo/casablanca-arrondissements.json` (~8 KB). The other 28
+  lightweight quartiers are informal, commonly-used neighborhood names
+  (Racine, CIL, Val Fleuri, Belvédère, Zenata, etc.) that have no official
+  boundary anywhere — even OpenStreetMap only has a single point for most
+  of them, since their extent is genuinely undefined in real life, not
+  just unmapped.
+
+  These 28 originally used a mix of hand-typed guesses and OSM points of
+  varying reliability — one guess (Zenata) turned out to be in the sea.
+  All 28 now come from a single verified source instead:
+  `scripts/fetch-quartier-locations.ts` looks each one up via the Places
+  API (New) and writes a real point + a viewport-derived box size into
+  `lib/geo/quartier-locations.json`, which `lib/staticData.ts` merges in
+  (falling back to the original hand-typed estimate only if a lookup ever
+  fails). This is still **not** a true boundary polygon — Google's public
+  API doesn't expose real neighborhood shapes for informal names any more
+  than OSM does, which is exactly why the 16 official arrondissements had
+  to come from OSM's actual administrative-boundary data instead. It's a
+  verified center point with a box sized to roughly the right extent, a
+  real accuracy upgrade over guessing, not a claim of a real outline.
 - **Static content instead of Supabase, and Mapbox instead of Google Maps.**
   The original spec called for a Supabase-backed data layer and the Google
   Maps JavaScript API. Both were swapped out on request, to get a fully

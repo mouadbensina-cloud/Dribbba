@@ -13,6 +13,7 @@ import type {
   QuartierProConRow,
 } from "./types";
 import realArrondissementRings from "./geo/casablanca-arrondissements.json";
+import quartierLocationOverrides from "./geo/quartier-locations.json";
 import quartierPriceOverrides from "./quartierPrices.json";
 
 export const STATIC_CITY: City = {
@@ -496,29 +497,36 @@ const LIGHTWEIGHT_INPUT: [string, string, number, number, Template][] = [
   ["Ain Chock", "ain-chock", 33.5445, -7.605, "residential-family"],
 ];
 
-// Real point coordinates from OpenStreetMap (place=quarter/suburb nodes),
-// correcting the rough estimates above for informal names that don't have
-// an official boundary to use instead. [lat, lng].
-const POINT_FIXES: Record<string, [number, number]> = {
-  racine: [33.5896092, -7.6407011],
-  cil: [33.5724839, -7.6577176],
-  "val-danfa": [33.5949159, -7.6543731],
-  beausejour: [33.5684105, -7.6492935],
-  californie: [33.5411922, -7.626038],
-  "derb-ghallef": [33.5736066, -7.6296039],
-  "ancienne-medina": [33.6007224, -7.6203326],
-  oasis: [33.5589388, -7.6386245],
-  polo: [33.5587054, -7.6163969],
-  "triangle-dor": [33.5883665, -7.6381283],
-  "centre-ville": [33.5906153, -7.6139096],
-  "ain-diab": [33.5811626, -7.6843877],
-  "val-fleuri": [33.5748756, -7.6369836],
-  palmier: [33.5806544, -7.6289276],
-  lissasfa: [33.5314545, -7.6724261],
-  oulfa: [33.5544751, -7.6797967],
-};
-
 const REAL_BOUNDARIES = realArrondissementRings as unknown as Record<string, [number, number][]>;
+
+// The informal quartier names with no official boundary to source from —
+// i.e. everything in LIGHTWEIGHT_INPUT that isn't one of the 16
+// arrondissement-matched slugs above. Exported so
+// scripts/fetch-quartier-locations.ts can look up real coordinates for
+// exactly this set instead of duplicating the list.
+export const QUARTIERS_NEEDING_LOCATION: [name: string, slug: string][] = LIGHTWEIGHT_INPUT.filter(
+  ([, slug]) => !REAL_BOUNDARIES[slug],
+).map(([name, slug]) => [name, slug]);
+
+// Verified points (+ a viewport-derived box size) from the Google Places/
+// Geocoding APIs for the informal quartier names that have no official
+// boundary anywhere — see scripts/fetch-quartier-locations.ts. Google's
+// public API returns a point and a rough bounding box for a named place,
+// not a true polygon outline (that's exactly why the 16 official
+// arrondissements above are sourced from OpenStreetMap instead, which does
+// have real surveyed boundaries) — this is a real accuracy upgrade over a
+// hand-typed guess, but still an approximate placeholder shape, not a
+// verified outline. Entries missing here (lookup failed, or the script
+// hasn't been run yet) fall back to the hardcoded estimate in
+// LIGHTWEIGHT_INPUT below.
+interface QuartierLocation {
+  lat: number;
+  lng: number;
+  dLat?: number;
+  dLng?: number;
+}
+
+const QUARTIER_LOCATIONS = quartierLocationOverrides as Record<string, QuartierLocation>;
 
 function ringCentroid(ring: [number, number][]): [number, number] {
   const lats = ring.map(([, lat]) => lat);
@@ -539,10 +547,23 @@ const LIGHTWEIGHT_QUARTIERS: QuartierDetail[] = LIGHTWEIGHT_INPUT.map(
     const t = TEMPLATES[template];
 
     const realBoundary = REAL_BOUNDARIES[slug];
-    const [lat, lng] = realBoundary
-      ? ringCentroid(realBoundary)
-      : (POINT_FIXES[slug] ?? [estimatedLat, estimatedLng]);
-    const polygon = realBoundary ? ringToPolygon(realBoundary) : smallPolygon(lat, lng);
+    const googleLocation = QUARTIER_LOCATIONS[slug];
+
+    let lat: number;
+    let lng: number;
+    let polygon: QuartierDetail["polygon"];
+
+    if (realBoundary) {
+      [lat, lng] = ringCentroid(realBoundary);
+      polygon = ringToPolygon(realBoundary);
+    } else if (googleLocation) {
+      ({ lat, lng } = googleLocation);
+      polygon = smallPolygon(lat, lng, googleLocation.dLat, googleLocation.dLng);
+    } else {
+      lat = estimatedLat;
+      lng = estimatedLng;
+      polygon = smallPolygon(lat, lng);
+    }
 
     return {
       id,
