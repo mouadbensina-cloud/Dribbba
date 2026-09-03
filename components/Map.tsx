@@ -6,9 +6,6 @@ import { useEffect, useRef, useState } from "react";
 import type { City, QuartierSummary } from "@/lib/types";
 
 const BRAND = "#e2622e";
-const SOURCE_ID = "quartiers";
-const FILL_LAYER_ID = "quartier-fill";
-const LINE_LAYER_ID = "quartier-line";
 
 const POINTS_SOURCE_ID = "quartier-points";
 const DOT_LAYER_ID = "quartier-dot";
@@ -21,7 +18,7 @@ const PILL_ICON_ID = "quartier-pill-bg";
 // appear as you zoom in — no clustering library needed.
 const PILL_ZOOM_THRESHOLD = 13;
 
-const CLICKABLE_LAYER_IDS = [FILL_LAYER_ID, DOT_LAYER_ID, PILL_LAYER_ID];
+const CLICKABLE_LAYER_IDS = [DOT_LAYER_ID, PILL_LAYER_ID];
 
 const SPARKLE_HTML = `
   <div style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:9999px;background:${BRAND};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.25);">
@@ -30,23 +27,17 @@ const SPARKLE_HTML = `
     </svg>
   </div>`;
 
-// Feature ids must be numeric here: Mapbox GL silently fails to propagate
-// feature-state to rendered features when a GeoJSON feature's top-level
-// `id` is a string (confirmed empirically against mapbox-gl 3.29 — the
-// source data keeps the string id fine, but queryRenderedFeatures/
-// setFeatureState then can't find it). The array index is a stable numeric
-// id since `quartiers` doesn't reorder between renders; `slug` still lives
-// in `properties` for click handling and filters, which read fine either way.
-function toFeatureCollection(quartiers: QuartierSummary[]): GeoJSON.FeatureCollection {
-  return {
-    type: "FeatureCollection",
-    features: quartiers.map((q, index) => ({
-      type: "Feature",
-      id: index,
-      properties: { slug: q.slug },
-      geometry: q.polygon as GeoJSON.Polygon,
-    })),
-  };
+// No shape is drawn on the map for any quartier — see README "Decisions I
+// made": even the 16 quartiers with a real surveyed boundary only had it
+// used for camera framing, and the other 31's shape was never more than an
+// approximate placeholder box, which read as more precise than it was.
+// Selecting a quartier instead swaps its default white dot/pill for this
+// filled, name-bearing badge.
+function buildSelectedBadge(name: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.textContent = name;
+  el.style.cssText = `display:flex;align-items:center;padding:7px 14px;border-radius:9999px;background:${BRAND};color:#ffffff;font-weight:600;font-size:13px;white-space:nowrap;box-shadow:0 2px 8px rgba(28,25,23,0.3);border:2px solid white;`;
+  return el;
 }
 
 function polygonBounds(polygon: QuartierSummary["polygon"]): mapboxgl.LngLatBounds {
@@ -57,6 +48,13 @@ function polygonBounds(polygon: QuartierSummary["polygon"]): mapboxgl.LngLatBoun
   return bounds;
 }
 
+// Feature ids must be numeric here: Mapbox GL silently fails to propagate
+// feature-state to rendered features when a GeoJSON feature's top-level
+// `id` is a string (confirmed empirically against mapbox-gl 3.29 — the
+// source data keeps the string id fine, but queryRenderedFeatures/
+// setFeatureState then can't find it). The array index is a stable numeric
+// id since `quartiers` doesn't reorder between renders; `slug` still lives
+// in `properties` for click handling and filters, which read fine either way.
 function toPointFeatureCollection(quartiers: QuartierSummary[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -109,7 +107,8 @@ interface MapProps {
 export function Map({ city, quartiers, selectedSlug, aiMatchSlugs, onSelectQuartier }: MapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const markersRef = useRef<Record<string, mapboxgl.Marker>>({});
+  const sparkleMarkersRef = useRef<Record<string, mapboxgl.Marker>>({});
+  const selectedMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const suppressMapClickRef = useRef(false);
   const [ready, setReady] = useState(false);
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -160,9 +159,9 @@ export function Map({ city, quartiers, selectedSlug, aiMatchSlugs, onSelectQuart
     }
 
     map.on("click", () => {
-      // The per-layer listeners above set this flag first when a quartier
-      // (shape, dot, or pill) was clicked, since Mapbox GL fires both
-      // listeners on the same click; skip deselecting in that case.
+      // The per-layer listeners above set this flag first when a dot/pill
+      // was clicked, since Mapbox GL fires both listeners on the same
+      // click; skip deselecting in that case.
       if (suppressMapClickRef.current) return;
       onSelectQuartier(null);
     });
@@ -185,20 +184,18 @@ export function Map({ city, quartiers, selectedSlug, aiMatchSlugs, onSelectQuart
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, city.id]);
 
-  // Add sources + layers once the style has loaded, and keep their data in
-  // sync if the quartier list changes.
+  // Add the points source + dot/pill layers once the style has loaded, and
+  // keep the source data in sync if the quartier list changes.
   useEffect(() => {
     if (!ready || !mapRef.current) return;
     const map = mapRef.current;
-    const shapes = toFeatureCollection(quartiers);
     const points = toPointFeatureCollection(quartiers);
 
-    const existingShapes = map.getSource(SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
     const existingPoints = map.getSource(POINTS_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
-
-    if (existingShapes) existingShapes.setData(shapes);
-    if (existingPoints) existingPoints.setData(points);
-    if (existingShapes && existingPoints) return;
+    if (existingPoints) {
+      existingPoints.setData(points);
+      return;
+    }
 
     if (!map.hasImage(PILL_ICON_ID)) {
       const icon = buildPillIcon();
@@ -209,40 +206,6 @@ export function Map({ city, quartiers, selectedSlug, aiMatchSlugs, onSelectQuart
         content: [icon.radius, 0, icon.width - icon.radius, icon.height],
       });
     }
-
-    if (!existingShapes) {
-      map.addSource(SOURCE_ID, { type: "geojson", data: shapes });
-      // A polygon is only ever shown filled/outlined once selected — at rest
-      // the city is represented by the dot/pill layers below instead.
-      map.addLayer({
-        id: FILL_LAYER_ID,
-        type: "fill",
-        source: SOURCE_ID,
-        paint: {
-          "fill-color": BRAND,
-          "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.4, 0],
-        },
-      });
-      map.addLayer({
-        id: LINE_LAYER_ID,
-        type: "line",
-        source: SOURCE_ID,
-        paint: {
-          "line-color": BRAND,
-          "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 2, 1.5],
-          "line-opacity": [
-            "case",
-            ["boolean", ["feature-state", "selected"], false],
-            1,
-            ["boolean", ["feature-state", "aiMatch"], false],
-            0.6,
-            0,
-          ],
-        },
-      });
-    }
-
-    if (existingPoints) return;
 
     map.addSource(POINTS_SOURCE_ID, { type: "geojson", data: points });
     map.addLayer({
@@ -297,36 +260,40 @@ export function Map({ city, quartiers, selectedSlug, aiMatchSlugs, onSelectQuart
     });
   }, [ready, quartiers]);
 
-  // Reactively style selected + AI-match state: hide the selected
-  // quartier's dot/pill (its shape is now the indicator instead), style its
-  // shape, and toggle AI-match sparkle markers.
+  // Toggle AI-match sparkle markers, and swap the selected quartier's
+  // default dot/pill for a filled, name-bearing badge (no shape is ever
+  // drawn — see the comment on buildSelectedBadge).
   useEffect(() => {
     if (!ready || !mapRef.current) return;
     const map = mapRef.current;
 
-    quartiers.forEach((quartier, index) => {
-      map.setFeatureState(
-        { source: SOURCE_ID, id: index },
-        {
-          selected: quartier.slug === selectedSlug,
-          aiMatch: aiMatchSlugs.includes(quartier.slug),
-        },
-      );
-
+    for (const quartier of quartiers) {
       const isAiMatch = aiMatchSlugs.includes(quartier.slug);
-      const existingMarker = markersRef.current[quartier.slug];
+      const existingMarker = sparkleMarkersRef.current[quartier.slug];
       if (isAiMatch && !existingMarker) {
         const el = document.createElement("div");
         el.innerHTML = SPARKLE_HTML;
         const marker = new mapboxgl.Marker({ element: el })
           .setLngLat([quartier.center_lng, quartier.center_lat])
           .addTo(map);
-        markersRef.current[quartier.slug] = marker;
+        sparkleMarkersRef.current[quartier.slug] = marker;
       } else if (!isAiMatch && existingMarker) {
         existingMarker.remove();
-        delete markersRef.current[quartier.slug];
+        delete sparkleMarkersRef.current[quartier.slug];
       }
-    });
+    }
+
+    selectedMarkerRef.current?.remove();
+    selectedMarkerRef.current = null;
+    const selectedQuartier = quartiers.find((q) => q.slug === selectedSlug);
+    if (selectedQuartier) {
+      selectedMarkerRef.current = new mapboxgl.Marker({
+        element: buildSelectedBadge(selectedQuartier.name),
+        anchor: "center",
+      })
+        .setLngLat([selectedQuartier.center_lng, selectedQuartier.center_lat])
+        .addTo(map);
+    }
 
     const hideSelectedFilter: mapboxgl.FilterSpecification | null = selectedSlug
       ? ["!=", ["get", "slug"], selectedSlug]
@@ -335,13 +302,14 @@ export function Map({ city, quartiers, selectedSlug, aiMatchSlugs, onSelectQuart
     if (map.getLayer(PILL_LAYER_ID)) map.setFilter(PILL_LAYER_ID, hideSelectedFilter);
   }, [ready, quartiers, selectedSlug, aiMatchSlugs]);
 
-  // Frame the selected quartier's actual shape when it's selected, instead
-  // of a fixed zoom bump — fitBounds sizes the zoom to the shape itself, so
-  // tiny placeholder polygons and huge arrondissements both end up
-  // reasonably framed. Selecting opens the bottom sheet's "preview" state,
-  // which covers the bottom ~45% of the screen (see BottomSheet's PREVIEW
-  // fraction) — asymmetric padding keeps the shape inside the space that's
-  // actually still visible, instead of centered behind the sheet.
+  // Frame the selected quartier when it's selected — fitBounds sizes the
+  // zoom to the quartier's real geographic extent (its polygon data still
+  // exists and is used for this, just never drawn — see above), so tiny
+  // and huge quartiers both end up reasonably framed. Selecting opens the
+  // bottom sheet's "preview" state, which covers the bottom ~45% of the
+  // screen (see BottomSheet's PREVIEW fraction) — asymmetric padding keeps
+  // the quartier inside the space that's actually still visible, instead
+  // of centered behind the sheet.
   useEffect(() => {
     if (!ready || !mapRef.current || !selectedSlug) return;
     const map = mapRef.current;

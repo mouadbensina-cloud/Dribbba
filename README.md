@@ -178,25 +178,38 @@ them silent:
   actually uses path-based deep links per its own curated quartier list
   (`/fr/sd/casablanca/{quartier}/appartements-a-vendre`), discovered by
   using Mubawab's own location search UI and reading the resulting URL.
-- **Quartiers are pills/dots by default, shapes only on selection.** On
-  request, the map no longer shows every polygon outline at once (too
-  cluttered at 47 quartiers). At rest, each quartier is a small dot; at
-  zoom ≥ 13 those dots expand into named pills (`icon-text-fit` capsule
-  images, Airbnb-style), using Mapbox's own label-collision system so fewer
-  names show when zoomed out and more appear as you zoom in — no clustering
-  library needed. A quartier's actual polygon (fill + outline) only
-  renders once it's selected; selecting one also hides that one's dot/pill
-  via `setFilter`, since the shape is now the indicator.
-- **Selecting a quartier frames its shape with `fitBounds`, not a fixed zoom
-  bump.** A flat "zoom in one level" doesn't account for how big the
-  selected shape actually is (a tiny placeholder polygon vs. a large
-  arrondissement) or how zoomed in the user already was — it either barely
-  moves or wildly over-zooms. `fitBounds(polygonBounds(quartier.polygon), …)`
-  sizes the zoom to the shape itself. Its `padding` is asymmetric — small on
-  top, ~48% of the container height on the bottom — to match the bottom
-  sheet's "preview" state (see BottomSheet's PREVIEW fraction), so the
-  shape lands fully inside the space still visible above the sheet instead
-  of being centered behind it.
+- **Quartiers are dots/pills only — no shape is ever drawn, not even for the
+  16 with a real boundary.** Originally a selected quartier's polygon (fill
+  + outline) rendered on the map. Investigating a user-reported bad shape
+  (Ancienne Médina's placeholder box looked nothing like its real,
+  irregular outline — see below) turned into confirming, across five
+  independent sources (OSM Overpass, OSM Nominatim, Google Places API,
+  Mapbox Geocoding API, Mapbox's own vector tiles, Who's on First), that no
+  free/public source has a real boundary for any of the 31 informal
+  quartiers — only the 16 official arrondissements do. Rendering 16 real
+  shapes next to 31 guessed boxes read as more precise than the data
+  actually is, and was inconsistent besides. Removed shape rendering
+  entirely, for all 47: at rest, each quartier is a small dot; at zoom ≥ 13
+  those dots expand into named pills (`icon-text-fit` capsule images,
+  Airbnb-style), using Mapbox's own label-collision system so fewer names
+  show when zoomed out and more appear as you zoom in — no clustering
+  library needed. Selecting a quartier now swaps its dot/pill for a filled,
+  name-bearing badge (`mapboxgl.Marker`, same pattern already used for the
+  Ask AI sparkle badges) instead of drawing a shape. The polygon data
+  itself wasn't deleted — every quartier still has a `polygon` field,
+  because `fitBounds` (below) still needs it for camera framing — it's
+  just never drawn on screen.
+- **Selecting a quartier frames its extent with `fitBounds`, not a fixed
+  zoom bump.** A flat "zoom in one level" doesn't account for how big the
+  selected quartier's extent actually is (a tiny placeholder box vs. a
+  large arrondissement) or how zoomed in the user already was — it either
+  barely moves or wildly over-zooms. `fitBounds(polygonBounds(quartier.polygon), …)`
+  sizes the zoom to that extent, even though the polygon itself is never
+  drawn (see above). Its `padding` is asymmetric — small on top, ~48% of
+  the container height on the bottom — to match the bottom sheet's
+  "preview" state (see BottomSheet's PREVIEW fraction), so the quartier
+  lands fully inside the space still visible above the sheet instead of
+  being centered behind it.
 - **Mapbox GL feature-state needs numeric feature ids.** Discovered while
   building the above: a GeoJSON source's features had `id: quartier.slug`
   (a string) — the source data keeps it fine, but `setFeatureState` /
